@@ -1,6 +1,6 @@
 # Coolify MCP Server
 
-![CoolifyMCP](https://github.com/wrediam/coolify-mcp-server/blob/main/graphics/CoolifyMCP.png)
+<img src="graphics/CoolifyMCP.png" width="256" alt="Coolify MCP Logo" />
 
 A Model Context Protocol server that provides integration with the Coolify API. This server enables interaction with Coolify instances through MCP tools.
 
