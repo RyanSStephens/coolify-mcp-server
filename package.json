@@ -1,6 +1,6 @@
 {
   "name": "coolify-mcp-server",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "MCP server for Coolify API integration",
   "type": "module",
   "main": "build/index.js",
@@ -21,12 +21,10 @@
   ],
   "author": "Will Reeves <will@wredia.com>",
   "license": "MIT",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^0.6.0",
-    "axios": "^1.6.7"
-  },
   "devDependencies": {
-    "@types/node": "^20.11.24",
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "@types/node": "^20.17.24",
+    "axios": "^1.8.3",
     "typescript": "^5.3.3"
   },
   "repository": {
