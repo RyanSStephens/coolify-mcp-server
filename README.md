@@ -1,8 +1,16 @@
 # Coolify MCP Server
 
+![CoolifyMCP](https://github.com/wrediam/coolify-mcp-server/graphics/CoolifyMCP.png)
+
 A Model Context Protocol server that provides integration with the Coolify API. This server enables interaction with Coolify instances through MCP tools.
 
 > **Compatibility:** Tested with Coolify version 4.0.0-beta.397
+
+## Prerequisites
+
+- Node.js 18 or higher
+- Coolify Base URL
+- Coolify API token
 
 ## Features
 
@@ -15,8 +23,6 @@ A Model Context Protocol server that provides integration with the Coolify API. 
 - Version and health checks
 
 ## Installation
-
-> **Note:** This package requires `@modelcontextprotocol/sdk` version 0.6.0 or higher. The SDK is currently in development and may not be publicly available on npm yet. If you encounter installation issues, please ensure you have access to the required SDK version.
 
 ```bash
 # Install globally
@@ -54,6 +60,30 @@ Add the following to your MCP settings configuration:
     "coolify": {
       "command": "npx",
       "args": ["-y", "coolify-mcp-server"],
+      "env": {
+        "COOLIFY_BASE_URL": "your-coolify-url",
+        "COOLIFY_TOKEN": "your-api-token"
+      },
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+Windows Cline users may need the following:
+
+```json
+{
+  "mcpServers": {
+    "coolify": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "coolify-mcp-server"
+      ],
       "env": {
         "COOLIFY_BASE_URL": "your-coolify-url",
         "COOLIFY_TOKEN": "your-api-token"
