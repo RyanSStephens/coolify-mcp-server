@@ -22,7 +22,7 @@ class CoolifyServer {
     this.server = new Server(
       {
         name: 'coolify-mcp-server',
-        version: '0.1.8',
+        version: '0.1.10',
       },
       {
         capabilities: {
