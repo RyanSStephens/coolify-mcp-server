@@ -1,6 +1,6 @@
 {
   "name": "coolify-mcp-server",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "MCP server for Coolify API integration",
   "type": "module",
   "main": "build/index.js",

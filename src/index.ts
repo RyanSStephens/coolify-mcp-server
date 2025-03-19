@@ -22,7 +22,7 @@ class CoolifyServer {
     this.server = new Server(
       {
         name: 'coolify-mcp-server',
-        version: '0.1.10',
+        version: '0.1.11',
       },
       {
         capabilities: {
@@ -65,7 +65,7 @@ class CoolifyServer {
         },
         {
           name: 'health_check',
-          description: 'Check Coolify API health status. Verifies if the API is responsive and functioning correctly.',
+          description: 'Check Coolify API health status. Note: This endpoint may not be available in all Coolify versions, including the current version (4.0.0-beta.397).',
           inputSchema: {
             type: 'object',
             properties: {},
@@ -90,15 +90,14 @@ class CoolifyServer {
         },
         {
           name: 'get_team',
-          description: 'Get details of a specific team. Requires a team UUID obtained from list_teams.',
+          description: 'Get details of a specific team. Requires a team ID obtained from list_teams.',
           inputSchema: {
             type: 'object',
             properties: {
               team_id: {
                 type: 'string',
-                description: 'UUID of the team to retrieve. This must be a valid UUID obtained from the list_teams response.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
-                examples: ['123e4567-e89b-12d3-a456-426614174000']
+                description: 'ID of the team to retrieve. This is typically a numeric ID obtained from the list_teams response.',
+                examples: ['0', '1', '42']
               }
             },
             required: ['team_id'],
@@ -274,8 +273,8 @@ class CoolifyServer {
             properties: {
               uuid: {
                 type: 'string',
-                description: 'UUID of the server to validate. Get this from list_servers.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                description: 'ID of the server to validate. Get this from list_servers.',
+                examples: ['f8wcgww']
               }
             },
             required: ['uuid'],
@@ -301,14 +300,14 @@ class CoolifyServer {
         },
         {
           name: 'get_server_resources',
-          description: 'Get detailed resource usage information for a server, including CPU, memory, disk, and network statistics.',
+          description: 'Get a list of applications and services running on a server. This provides an overview of all resources deployed on the specified server.',
           inputSchema: {
             type: 'object',
             properties: {
               uuid: {
                 type: 'string',
-                description: 'UUID of the server to check. Get this from list_servers.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                description: 'ID of the server to check. Get this from list_servers.',
+                examples: ['f8wcgww']
               }
             },
             required: ['uuid'],
@@ -318,13 +317,13 @@ class CoolifyServer {
               }
             ],
             additionalInfo: {
-              responseFormat: 'Returns an object with detailed resource metrics',
-              usage: 'Monitor server health and resource utilization',
+              responseFormat: 'Returns an array of applications and services running on the server',
+              usage: 'Monitor what is deployed on a server and check their status',
               notes: [
-                'Provides real-time resource usage statistics',
-                'Useful for capacity planning and monitoring',
-                'Helps identify performance issues or resource constraints',
-                'Regular monitoring recommended for production servers'
+                'Lists all applications and services on the specified server',
+                'Includes status information (running, stopped, healthy, unhealthy)',
+                'Helps identify which resources are deployed on a server',
+                'Useful for server management and troubleshooting'
               ]
             }
           }
@@ -337,8 +336,8 @@ class CoolifyServer {
             properties: {
               uuid: {
                 type: 'string',
-                description: 'UUID of the server to get domains for. Get this from list_servers.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                description: 'ID of the server to get domains for. Get this from list_servers.',
+                examples: ['f8wcgww']
               }
             },
             required: ['uuid'],
@@ -772,7 +771,7 @@ class CoolifyServer {
         },
         {
           name: 'execute_command_application',
-          description: 'Execute a command inside a running application container. Useful for debugging, maintenance, or running one-off tasks.',
+          description: 'Execute a command inside a running application container. Useful for debugging, maintenance, or running one-off tasks. Note: This endpoint may not be available in all Coolify versions, including the current version (4.0.0-beta.397).',
           inputSchema: {
             type: 'object',
             properties: {
@@ -967,10 +966,32 @@ class CoolifyServer {
             };
 
           case 'health_check':
-            const healthResponse = await this.axiosInstance.get('/health');
-            return {
-              content: [{ type: 'text', text: JSON.stringify(healthResponse.data, null, 2) }]
-            };
+            // The health endpoint might not be available in all Coolify versions
+            try {
+              const healthResponse = await this.axiosInstance.get('/health');
+              return {
+                content: [{ type: 'text', text: JSON.stringify(healthResponse.data, null, 2) }]
+              };
+            } catch (error) {
+              // Instead of throwing an error, return a message
+              if (axios.isAxiosError(error) && error.response?.status === 404) {
+                return {
+                  content: [{ 
+                    type: 'text', 
+                    text: "Health check endpoint not available in this Coolify version (4.0.0-beta.397)."
+                  }]
+                };
+              } else {
+                // For other errors, provide more details
+                return {
+                  content: [{ 
+                    type: 'text', 
+                    text: "Error checking Coolify health: " + 
+                          (axios.isAxiosError(error) ? error.response?.data?.message || error.message : 'Unknown error')
+                  }]
+                };
+              }
+            }
 
           // Teams
           case 'list_teams':
@@ -1095,13 +1116,34 @@ class CoolifyServer {
             };
 
           case 'execute_command_application':
-            const executeResponse = await this.axiosInstance.post(
-              `/applications/${request.params.arguments?.uuid}/execute`,
-              { command: request.params.arguments?.command }
-            );
-            return {
-              content: [{ type: 'text', text: JSON.stringify(executeResponse.data, null, 2) }]
-            };
+            try {
+              const executeResponse = await this.axiosInstance.post(
+                `/applications/${request.params.arguments?.uuid}/execute`,
+                { command: request.params.arguments?.command }
+              );
+              return {
+                content: [{ type: 'text', text: JSON.stringify(executeResponse.data, null, 2) }]
+              };
+            } catch (error) {
+              // Instead of throwing an error, return a message
+              if (axios.isAxiosError(error) && error.response?.status === 404) {
+                return {
+                  content: [{ 
+                    type: 'text', 
+                    text: "Execute command endpoint not available in this Coolify version (4.0.0-beta.397) or the application UUID is invalid."
+                  }]
+                };
+              } else {
+                // For other errors, provide more details
+                return {
+                  content: [{ 
+                    type: 'text', 
+                    text: "Error executing command: " + 
+                          (axios.isAxiosError(error) ? error.response?.data?.message || error.message : 'Unknown error')
+                  }]
+                };
+              }
+            }
 
           // Deployments
           case 'list_deployments':
