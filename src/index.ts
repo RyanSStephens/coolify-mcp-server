@@ -819,6 +819,60 @@ class CoolifyServer {
             }
           }
         },
+        {
+          name: 'get_application_logs',
+          description: 'Get application logs by UUID. Essential for debugging and monitoring application behavior, errors, and performance issues. Retrieve logs from running applications to troubleshoot deployment issues and monitor application health.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              uuid: {
+                type: 'string',
+                description: 'UUID of the application to retrieve logs for. Get this from list_applications.',
+                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+                examples: ['123e4567-e89b-12d3-a456-426614174000']
+              },
+              lines: {
+                type: 'number',
+                description: 'Number of lines to show from the end of the logs. Controls log volume for performance. Default is 100 lines.',
+                minimum: 1,
+                default: 100,
+                examples: [100, 500, 1000]
+              }
+            },
+            required: ['uuid'],
+            examples: [
+              {
+                uuid: '123e4567-e89b-12d3-a456-426614174000'
+              },
+              {
+                uuid: '123e4567-e89b-12d3-a456-426614174000',
+                lines: 500
+              }
+            ],
+            additionalInfo: {
+              responseFormat: 'Returns JSON object with "logs" field containing application log entries as a string',
+              usage: 'Essential for application debugging, error investigation, and monitoring application behavior',
+              workflow: [
+                '1. Get the application UUID from list_applications',
+                '2. Optionally specify number of log lines to retrieve (default 100)',
+                '3. Review logs for errors, warnings, or application behavior',
+                '4. Use with other tools for comprehensive troubleshooting'
+              ],
+              relatedTools: [
+                'list_applications - Get UUIDs of available applications',
+                'execute_command_application - Run debugging commands in the application',
+                'restart_application - Restart application if issues found in logs',
+                'get_deployment - Check deployment status if log errors relate to deployment'
+              ],
+              notes: [
+                'Logs are retrieved from the end (most recent entries first)',
+                'Large line counts may take longer to retrieve and display',
+                'Use this tool for debugging deployment issues, runtime errors, and monitoring',
+                'Logs show application stdout/stderr and container lifecycle events'
+              ]
+            }
+          }
+        },
         // Deployments
         {
           name: 'list_deployments',
@@ -1144,6 +1198,19 @@ class CoolifyServer {
                 };
               }
             }
+
+          case 'get_application_logs':
+            const uuid = request.params.arguments?.uuid;
+            const lines = request.params.arguments?.lines || 100;
+            if (!uuid) {
+              throw new McpError(ErrorCode.InvalidParams, 'uuid is required');
+            }
+            const logsResponse = await this.axiosInstance.get(`/applications/${uuid}/logs`, {
+              params: { lines }
+            });
+            return {
+              content: [{ type: 'text', text: JSON.stringify(logsResponse.data, null, 2) }]
+            };
 
           // Deployments
           case 'list_deployments':
