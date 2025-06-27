@@ -4,7 +4,7 @@
 
 A Model Context Protocol server that provides integration with the Coolify API. This server enables interaction with Coolify instances through MCP tools.
 
-> **Compatibility:** Tested with Coolify version 4.0.0-beta.397
+> **Compatibility:** Supports Coolify version 4.0.0-beta.380+ with automatic version detection and feature compatibility. Tested with versions up to 4.0.0-beta.420.1. API endpoints updated to match official Coolify documentation.
 
 ## Prerequisites
 
@@ -15,12 +15,16 @@ A Model Context Protocol server that provides integration with the Coolify API. 
 ## Features
 
 - Teams management (list, get details, members)
+- **Project management (list, get, create)** ✨ **NEW**
+- **Environment management (list, create within projects)** ✨ **NEW**
 - Server management (create, validate, resources, domains)
-- Service lifecycle management (start, stop, restart)
-- Application lifecycle management (start, stop, restart, execute commands)
+- Service lifecycle management (create, start, stop, restart)
+- Application lifecycle management (create, start, stop, restart, execute commands)
 - Deployment tracking
 - Private key management
 - Version and health checks
+- **Enhanced error reporting with detailed validation messages** ✨ **IMPROVED**
+- **Coolify UUID format compatibility** ✨ **FIXED**
 
 ## Installation
 
@@ -114,6 +118,15 @@ Windows Cline users may need the following:
 - `get_server_resources`: Get server resource usage
 - `get_server_domains`: Get server domains
 
+#### Projects ✨ **NEW**
+- `list_projects`: List all projects
+- `get_project`: Get details of a specific project
+- `create_project`: Create a new project
+
+#### Environments ✨ **NEW**  
+- `list_environments`: List environments in a project
+- `create_environment`: Create a new environment within a project
+
 #### Services
 - `list_services`: List all services
 - `create_service`: Create a new service
@@ -128,6 +141,7 @@ Windows Cline users may need the following:
 - `stop_application`: Stop an application
 - `restart_application`: Restart an application
 - `execute_command_application`: Execute command in application container
+- `get_application_logs`: Get application logs for debugging
 
 #### Deployments
 - `list_deployments`: List all deployments
