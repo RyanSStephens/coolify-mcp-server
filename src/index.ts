@@ -14,15 +14,24 @@ interface CoolifyConfig {
   token: string;
 }
 
+interface CoolifyVersion {
+  version: string;
+  major: number;
+  minor: number;
+  patch: number;
+  beta?: number;
+}
+
 class CoolifyServer {
   private server: Server;
   private axiosInstance: AxiosInstance | null = null;
+  private coolifyVersion: CoolifyVersion | null = null;
 
   constructor() {
     this.server = new Server(
       {
         name: 'coolify-mcp-server',
-        version: '0.1.11',
+        version: '0.1.13',
       },
       {
         capabilities: {
@@ -45,8 +54,69 @@ class CoolifyServer {
       headers: {
         'Authorization': `Bearer ${config.token}`,
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: 30000 // 30 second timeout
     });
+
+    // Add response interceptor for rate limiting
+    this.axiosInstance.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (axios.isAxiosError(error) && error.response?.status === 429) {
+          const retryAfter = error.response.headers['retry-after'];
+          const message = `Rate limit exceeded. ${retryAfter ? `Retry after ${retryAfter} seconds.` : 'Please wait before making more requests.'}`;
+          throw new McpError(ErrorCode.InternalError, `Coolify API rate limit: ${message}`);
+        }
+        return Promise.reject(error);
+      }
+    );
+  }
+
+  private async detectCoolifyVersion(): Promise<void> {
+    if (!this.axiosInstance) return;
+    
+    try {
+      const response = await this.axiosInstance.get('/version');
+      const versionString = response.data?.version || response.data?.coolify || 'unknown';
+      this.coolifyVersion = this.parseVersion(versionString);
+    } catch (error) {
+      console.error('Could not detect Coolify version:', error);
+      // Set a default compatible version
+      this.coolifyVersion = { version: '4.0.0-beta.420', major: 4, minor: 0, patch: 0, beta: 420 };
+    }
+  }
+
+  private parseVersion(versionString: string): CoolifyVersion {
+    const match = versionString.match(/^v?(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?/);
+    if (match) {
+      return {
+        version: versionString,
+        major: parseInt(match[1]),
+        minor: parseInt(match[2]),
+        patch: parseInt(match[3]),
+        beta: match[4] ? parseInt(match[4]) : undefined
+      };
+    }
+    // Fallback for unknown version format
+    return { version: versionString, major: 4, minor: 0, patch: 0, beta: 420 };
+  }
+
+  private isFeatureAvailable(feature: string): boolean {
+    if (!this.coolifyVersion) return true; // Assume available if version unknown
+    
+    const { major, minor, patch, beta } = this.coolifyVersion;
+    
+    // Define feature availability based on version
+    switch (feature) {
+      case 'health_check':
+        return true; // Health endpoint is available in the API docs
+      case 'execute_command':
+        return beta ? beta >= 400 : major >= 4; // Available from beta.400+
+      case 'application_logs':
+        return beta ? beta >= 380 : major >= 4; // Available from beta.380+
+      default:
+        return true; // Assume other features are available
+    }
   }
 
   private setupToolHandlers() {
@@ -65,7 +135,7 @@ class CoolifyServer {
         },
         {
           name: 'health_check',
-          description: 'Check Coolify API health status. Note: This endpoint may not be available in all Coolify versions, including the current version (4.0.0-beta.397).',
+          description: 'Check Coolify API health status. Note: This endpoint may not be available in all Coolify versions.',
           inputSchema: {
             type: 'object',
             properties: {},
@@ -103,7 +173,7 @@ class CoolifyServer {
             required: ['team_id'],
             examples: [
               {
-                team_id: '123e4567-e89b-12d3-a456-426614174000'
+                team_id: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -217,7 +287,7 @@ class CoolifyServer {
               private_key_uuid: { 
                 type: 'string',
                 description: 'UUID of the private key to use for SSH authentication. Obtain this from list_private_keys.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               },
               is_build_server: { 
                 type: 'boolean',
@@ -244,7 +314,7 @@ class CoolifyServer {
                 ip: '192.168.1.100',
                 port: 22,
                 user: 'root',
-                private_key_uuid: '123e4567-e89b-12d3-a456-426614174000',
+                private_key_uuid: 'sg4gsws44wksg040o4ok80ww',
                 is_build_server: false,
                 instant_validate: true,
                 proxy_type: 'nginx'
@@ -280,7 +350,7 @@ class CoolifyServer {
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -313,7 +383,7 @@ class CoolifyServer {
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -343,7 +413,7 @@ class CoolifyServer {
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -358,6 +428,109 @@ class CoolifyServer {
             }
           }
         },
+        // Projects
+        {
+          name: 'list_projects',
+          description: 'List all projects accessible by the current user. Projects organize applications and services into logical groups.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            required: [],
+            examples: [{}],
+            additionalInfo: {
+              responseFormat: 'Returns an array of project objects containing UUIDs, names, descriptions, and team associations',
+              usage: 'Use this to get project UUIDs needed for creating applications and services'
+            }
+          }
+        },
+        {
+          name: 'get_project',
+          description: 'Get details of a specific project including its environments.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              project_uuid: {
+                type: 'string',
+                description: 'UUID of the project to retrieve. Get this from list_projects.',
+                pattern: '^[a-zA-Z0-9]+$',
+                examples: ['sg4gsws44wksg040o4ok80ww']
+              }
+            },
+            required: ['project_uuid'],
+            examples: [{ project_uuid: 'sg4gsws44wksg040o4ok80ww' }]
+          }
+        },
+        {
+          name: 'create_project',
+          description: 'Create a new project to organize applications and services.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Name of the project',
+                examples: ['My App']
+              },
+              description: {
+                type: 'string',
+                description: 'Optional description of the project',
+                examples: ['Production environment for my application']
+              }
+            },
+            required: ['name'],
+            examples: [
+              { name: 'My App', description: 'Production environment for my application' }
+            ]
+          }
+        },
+        // Environments  
+        {
+          name: 'list_environments',
+          description: 'List all environments in a project. Environments separate different deployment stages like production, staging, development.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              project_uuid: {
+                type: 'string',
+                description: 'UUID of the project to list environments for. Get this from list_projects.',
+                pattern: '^[a-zA-Z0-9]+$',
+                examples: ['sg4gsws44wksg040o4ok80ww']
+              }
+            },
+            required: ['project_uuid'],
+            examples: [{ project_uuid: 'sg4gsws44wksg040o4ok80ww' }]
+          }
+        },
+        {
+          name: 'create_environment',
+          description: 'Create a new environment within a project.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              project_uuid: {
+                type: 'string',
+                description: 'UUID of the project where this environment will be created',
+                pattern: '^[a-zA-Z0-9]+$',
+                examples: ['sg4gsws44wksg040o4ok80ww']
+              },
+              name: {
+                type: 'string',
+                description: 'Name of the environment',
+                examples: ['staging', 'production', 'development']
+              },
+              description: {
+                type: 'string',
+                description: 'Optional description of the environment',
+                examples: ['Staging environment for testing']
+              }
+            },
+            required: ['project_uuid', 'name'],
+            examples: [
+              { project_uuid: 'sg4gsws44wksg040o4ok80ww', name: 'staging', description: 'Staging environment for testing' }
+            ]
+          }
+        },
+
         // Services
         {
           name: 'list_services',
@@ -387,7 +560,7 @@ class CoolifyServer {
         },
         {
           name: 'create_service',
-          description: 'Create a new service on a specified server. Services are containerized applications that run on your Coolify servers.',
+          description: 'Create a new service on a specified server. Services are containerized applications that run on your Coolify servers. Either "type" or "docker_compose_raw" must be provided - you cannot specify both.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -404,12 +577,12 @@ class CoolifyServer {
               server_uuid: { 
                 type: 'string',
                 description: 'UUID of the server where this service will run. Obtain this from list_servers.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               },
               project_uuid: { 
                 type: 'string',
                 description: 'UUID of the project this service belongs to. Projects help organize related services.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               },
               environment_name: { 
                 type: 'string',
@@ -419,7 +592,17 @@ class CoolifyServer {
               environment_uuid: { 
                 type: 'string',
                 description: 'Optional UUID of an existing environment to use',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
+              },
+              type: {
+                type: 'string',
+                description: 'Type of service to create. Required if docker_compose_raw is not provided. Cannot be used together with docker_compose_raw.',
+                examples: ['mysql', 'redis', 'postgresql', 'mongodb']
+              },
+              docker_compose_raw: {
+                type: 'string',
+                description: 'Raw Docker Compose configuration for the service. Required if type is not provided. Cannot be used together with type.',
+                examples: ['version: \'3.8\'\nservices:\n  web:\n    image: nginx:alpine\n    ports:\n      - "80:80"']
               }
             },
             required: ['name', 'server_uuid', 'project_uuid'],
@@ -427,16 +610,26 @@ class CoolifyServer {
               {
                 name: 'backend-api',
                 description: 'Node.js backend API service',
-                server_uuid: '123e4567-e89b-12d3-a456-426614174000',
-                project_uuid: '987fcdeb-51a2-43f7-9876-543210abcdef',
-                environment_name: 'production'
+                server_uuid: 'sg4gsws44wksg040o4ok80ww',
+                project_uuid: 'p4w8gk4s0c8c4o0ksw80ok4w',
+                environment_name: 'production',
+                type: 'mysql'
+              },
+              {
+                name: 'custom-web-service',
+                description: 'Custom web service with Docker Compose',
+                server_uuid: 'sg4gsws44wksg040o4ok80ww',
+                project_uuid: 'p4w8gk4s0c8c4o0ksw80ok4w',
+                environment_name: 'production',
+                docker_compose_raw: 'version: \'3.8\'\nservices:\n  web:\n    image: nginx:alpine\n    ports:\n      - "80:80"'
               }
             ],
             additionalInfo: {
               workflow: [
                 '1. First call list_servers to get available server UUIDs',
                 '2. Use a server UUID from the response when creating the service',
-                '3. After creation, you can start the service using start_service'
+                '3. Choose either "type" for predefined services or "docker_compose_raw" for custom configurations',
+                '4. After creation, you can start the service using start_service'
               ],
               relatedTools: [
                 'list_servers - Get available servers',
@@ -447,6 +640,9 @@ class CoolifyServer {
               notes: [
                 'Services are tied to specific servers and projects',
                 'Environment configuration helps organize services across different deployment stages',
+                'Either "type" or "docker_compose_raw" must be provided, but not both',
+                'Use "type" for predefined service templates (mysql, redis, postgresql, etc.)',
+                'Use "docker_compose_raw" for custom Docker Compose configurations',
                 'After creating a service, you\'ll need its UUID for management operations'
               ]
             }
@@ -461,13 +657,13 @@ class CoolifyServer {
               uuid: {
                 type: 'string',
                 description: 'UUID of the service to start. Obtain this from list_services or from the create_service response.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               }
             },
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -498,13 +694,13 @@ class CoolifyServer {
               uuid: {
                 type: 'string',
                 description: 'UUID of the service to stop. Get this from list_services.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               }
             },
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -534,13 +730,13 @@ class CoolifyServer {
               uuid: {
                 type: 'string',
                 description: 'UUID of the service to restart. Get this from list_services.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               }
             },
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -600,7 +796,7 @@ class CoolifyServer {
               project_uuid: { 
                 type: 'string',
                 description: 'UUID of the project this application belongs to. Projects help organize related applications.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               },
               environment_name: { 
                 type: 'string',
@@ -610,7 +806,7 @@ class CoolifyServer {
               environment_uuid: { 
                 type: 'string',
                 description: 'Optional UUID of an existing environment to use',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               },
               git_repository: { 
                 type: 'string',
@@ -625,17 +821,17 @@ class CoolifyServer {
               destination_uuid: { 
                 type: 'string',
                 description: 'UUID of the destination server where this application will be deployed. Get this from list_servers.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               }
             },
             required: ['project_uuid', 'environment_name', 'destination_uuid'],
             examples: [
               {
-                project_uuid: '123e4567-e89b-12d3-a456-426614174000',
+                project_uuid: 'sg4gsws44wksg040o4ok80ww',
                 environment_name: 'production',
                 git_repository: 'https://github.com/username/repo.git',
                 ports_exposes: '3000',
-                destination_uuid: '987fcdeb-51a2-43f7-9876-543210abcdef'
+                destination_uuid: 'p4w8gk4s0c8c4o0ksw80ok4w'
               }
             ],
             additionalInfo: {
@@ -670,13 +866,13 @@ class CoolifyServer {
               uuid: {
                 type: 'string',
                 description: 'UUID of the application to start. Obtain this from list_applications or from the create_application response.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               }
             },
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -703,13 +899,13 @@ class CoolifyServer {
               uuid: {
                 type: 'string',
                 description: 'UUID of the application to stop. Get this from list_applications.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               }
             },
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -739,13 +935,13 @@ class CoolifyServer {
               uuid: {
                 type: 'string',
                 description: 'UUID of the application to restart. Get this from list_applications.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               }
             },
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -771,14 +967,14 @@ class CoolifyServer {
         },
         {
           name: 'execute_command_application',
-          description: 'Execute a command inside a running application container. Useful for debugging, maintenance, or running one-off tasks. Note: This endpoint may not be available in all Coolify versions, including the current version (4.0.0-beta.397).',
+          description: 'Execute a command inside a running application container. Useful for debugging, maintenance, or running one-off tasks. Note: This endpoint may not be available in all Coolify versions.',
           inputSchema: {
             type: 'object',
             properties: {
               uuid: {
                 type: 'string',
                 description: 'UUID of the application where the command will be executed. Get this from list_applications.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               },
               command: {
                 type: 'string',
@@ -794,7 +990,7 @@ class CoolifyServer {
             required: ['uuid', 'command'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000',
+                uuid: 'sg4gsws44wksg040o4ok80ww',
                 command: 'npm run migrations'
               }
             ],
@@ -828,8 +1024,8 @@ class CoolifyServer {
               uuid: {
                 type: 'string',
                 description: 'UUID of the application to retrieve logs for. Get this from list_applications.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
-                examples: ['123e4567-e89b-12d3-a456-426614174000']
+                pattern: '^[a-zA-Z0-9]+$',
+                examples: ['sg4gsws44wksg040o4ok80ww']
               },
               lines: {
                 type: 'number',
@@ -842,10 +1038,10 @@ class CoolifyServer {
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               },
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000',
+                uuid: 'sg4gsws44wksg040o4ok80ww',
                 lines: 500
               }
             ],
@@ -902,13 +1098,13 @@ class CoolifyServer {
               uuid: {
                 type: 'string',
                 description: 'UUID of the deployment to retrieve. Obtain this from list_deployments or from deployment event responses.',
-                pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                pattern: '^[a-zA-Z0-9]+$'
               }
             },
             required: ['uuid'],
             examples: [
               {
-                uuid: '123e4567-e89b-12d3-a456-426614174000'
+                uuid: 'sg4gsws44wksg040o4ok80ww'
               }
             ],
             additionalInfo: {
@@ -1020,9 +1216,18 @@ class CoolifyServer {
             };
 
           case 'health_check':
-            // The health endpoint might not be available in all Coolify versions
+            // Check if health endpoint is available in this version
+            if (!this.isFeatureAvailable('health_check')) {
+              return {
+                content: [{ 
+                  type: 'text', 
+                  text: `Health check endpoint not available in Coolify ${this.coolifyVersion?.version || 'this version'}.`
+                }]
+              };
+            }
+            
             try {
-              const healthResponse = await this.axiosInstance.get('/health');
+              const healthResponse = await this.axiosInstance.get('/healthcheck');
               return {
                 content: [{ type: 'text', text: JSON.stringify(healthResponse.data, null, 2) }]
               };
@@ -1032,7 +1237,7 @@ class CoolifyServer {
                 return {
                   content: [{ 
                     type: 'text', 
-                    text: "Health check endpoint not available in this Coolify version (4.0.0-beta.397)."
+                    text: `Health check endpoint not available in Coolify ${this.coolifyVersion?.version || 'this version'}.`
                   }]
                 };
               } else {
@@ -1107,6 +1312,46 @@ class CoolifyServer {
               content: [{ type: 'text', text: JSON.stringify(serverDomainsResponse.data, null, 2) }]
             };
 
+          // Projects
+          case 'list_projects':
+            const projectsResponse = await this.axiosInstance.get('/projects');
+            return {
+              content: [{ type: 'text', text: JSON.stringify(projectsResponse.data, null, 2) }]
+            };
+
+          case 'get_project':
+            const projectUuid = request.params.arguments?.project_uuid;
+            if (!projectUuid) {
+              throw new McpError(ErrorCode.InvalidParams, 'project_uuid is required');
+            }
+            const projectResponse = await this.axiosInstance.get(`/projects/${projectUuid}`);
+            return {
+              content: [{ type: 'text', text: JSON.stringify(projectResponse.data, null, 2) }]
+            };
+
+          case 'create_project':
+            const createProjectResponse = await this.axiosInstance.post('/projects', request.params.arguments);
+            return {
+              content: [{ type: 'text', text: JSON.stringify(createProjectResponse.data, null, 2) }]
+            };
+
+          // Environments
+          case 'list_environments':
+            const envProjectUuid = request.params.arguments?.project_uuid;
+            if (!envProjectUuid) {
+              throw new McpError(ErrorCode.InvalidParams, 'project_uuid is required');
+            }
+            const environmentsResponse = await this.axiosInstance.get(`/projects/${envProjectUuid}/environments`);
+            return {
+              content: [{ type: 'text', text: JSON.stringify(environmentsResponse.data, null, 2) }]
+            };
+
+          case 'create_environment':
+            const createEnvironmentResponse = await this.axiosInstance.post('/environments', request.params.arguments);
+            return {
+              content: [{ type: 'text', text: JSON.stringify(createEnvironmentResponse.data, null, 2) }]
+            };
+
           // Services
           case 'list_services':
             const servicesResponse = await this.axiosInstance.get('/services');
@@ -1115,10 +1360,27 @@ class CoolifyServer {
             };
 
           case 'create_service':
-            const createServiceResponse = await this.axiosInstance.post('/services', request.params.arguments);
-            return {
-              content: [{ type: 'text', text: JSON.stringify(createServiceResponse.data, null, 2) }]
-            };
+            try {
+              const createServiceResponse = await this.axiosInstance.post('/services', request.params.arguments);
+              return {
+                content: [{ type: 'text', text: JSON.stringify(createServiceResponse.data, null, 2) }]
+              };
+            } catch (error) {
+              if (axios.isAxiosError(error) && error.response) {
+                const errorDetail = {
+                  status: error.response.status,
+                  statusText: error.response.statusText,
+                  data: error.response.data,
+                  requestUrl: error.config?.url,
+                  requestMethod: error.config?.method,
+                  requestData: request.params.arguments
+                };
+                return {
+                  content: [{ type: 'text', text: `Service creation failed with detailed error:\n${JSON.stringify(errorDetail, null, 2)}` }]
+                };
+              }
+              throw error;
+            }
 
           case 'start_service':
             const startServiceResponse = await this.axiosInstance.get(`/services/${request.params.arguments?.uuid}/start`);
@@ -1140,7 +1402,7 @@ class CoolifyServer {
 
           // Applications
           case 'list_applications':
-            const applicationsResponse = await this.axiosInstance.get('/applications');
+            const applicationsResponse = await this.axiosInstance.get('/resources');
             return {
               content: [{ type: 'text', text: JSON.stringify(applicationsResponse.data, null, 2) }]
             };
@@ -1170,6 +1432,16 @@ class CoolifyServer {
             };
 
           case 'execute_command_application':
+            // Check if execute command endpoint is available in this version
+            if (!this.isFeatureAvailable('execute_command')) {
+              return {
+                content: [{ 
+                  type: 'text', 
+                  text: `Execute command endpoint not available in Coolify ${this.coolifyVersion?.version || 'this version'}. This feature requires Coolify v4.0.0-beta.400 or later.`
+                }]
+              };
+            }
+            
             try {
               const executeResponse = await this.axiosInstance.post(
                 `/applications/${request.params.arguments?.uuid}/execute`,
@@ -1184,7 +1456,7 @@ class CoolifyServer {
                 return {
                   content: [{ 
                     type: 'text', 
-                    text: "Execute command endpoint not available in this Coolify version (4.0.0-beta.397) or the application UUID is invalid."
+                    text: `Execute command endpoint not available in Coolify ${this.coolifyVersion?.version || 'this version'} or the application UUID is invalid.`
                   }]
                 };
               } else {
@@ -1265,11 +1537,14 @@ class CoolifyServer {
     }
 
     this.initializeAxios({ baseUrl, token });
+    
+    // Detect Coolify version for feature compatibility
+    await this.detectCoolifyVersion();
+    
     this.setupToolHandlers();
 
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('Coolify MCP server running on stdio');
   }
 }
 
